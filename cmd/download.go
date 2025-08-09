@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,13 +22,49 @@ import (
 
 // DownloadOpts 包含下载操作的选项
 type DownloadOpts struct {
-	outputDir    string // 文件保存的目录
-	dump         bool   // 是否转储API的JSON响应
-	batch        bool   // 是否下载文件夹中的所有文档
-	wiki         bool   // 是否下载知识库中的所有文档
-	wikiChildren bool   // 是否下载指定知识库文档下的所有子文档
-	spaceID      string // 知识库空间ID（用于检查子节点）
-	nodeToken    string // 当前节点令牌（用于检查子节点）
+	outputDir     string // 文件保存的目录
+	dumpJSON      bool   // 是否转储API的JSON响应
+	skipDuplicate bool   // 是否跳过重复文件
+	forceDownload bool   // 是否强制下载
+	spaceID       string // 知识库空间ID（用于检查子节点）
+	nodeToken     string // 当前节点令牌（用于检查子节点）
+}
+
+// calculateMD5 计算字符串的MD5哈希值
+func calculateMD5(content string) string {
+	h := md5.New()
+	io.WriteString(h, content)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// fileExists 检查文件是否存在
+func fileExists(filepath string) bool {
+	_, err := os.Stat(filepath)
+	return !os.IsNotExist(err)
+}
+
+// shouldSkipFile 检查是否应该跳过文件下载（基于内容对比）
+func shouldSkipFile(outputPath, content string, skipDuplicate bool) bool {
+	if !skipDuplicate {
+		return false
+	}
+
+	if !fileExists(outputPath) {
+		return false
+	}
+
+	// 读取现有文件内容
+	existingContent, err := os.ReadFile(outputPath)
+	if err != nil {
+		// 读取失败，不跳过
+		return false
+	}
+
+	// 对比MD5哈希值
+	existingMD5 := calculateMD5(string(existingContent))
+	newMD5 := calculateMD5(content)
+
+	return existingMD5 == newMD5
 }
 
 // dlConfig 保存当前下载操作的配置
@@ -109,9 +147,9 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 		}
 	}
 
-	if opts.dump {
+	if opts.dumpJSON {
 		jsonName := fmt.Sprintf("%s.json", docToken)
-		outputPath := filepath.Join(opts.outputDir, jsonName)
+		jsonOutputPath := filepath.Join(opts.outputDir, jsonName)
 		data := struct {
 			Document *lark.DocxDocument `json:"document"`
 			Blocks   []*lark.DocxBlock  `json:"blocks"`
@@ -121,10 +159,15 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 		}
 		pdata := utils.PrettyPrint(data)
 
-		if err = os.WriteFile(outputPath, []byte(pdata), 0o644); err != nil {
-			return err
+		// 检查JSON文件是否需要跳过
+		if !opts.forceDownload && shouldSkipFile(jsonOutputPath, pdata, opts.skipDuplicate) {
+			fmt.Printf("⏭️  跳过重复JSON: %s\n", jsonName)
+		} else {
+			if err = os.WriteFile(jsonOutputPath, []byte(pdata), 0o644); err != nil {
+				return err
+			}
+			fmt.Printf("📄 JSON响应已转储到 %s\n", jsonOutputPath)
 		}
-		fmt.Printf("📄 JSON响应已转储到 %s\n", outputPath)
 	}
 
 	// 写入markdown文件
@@ -133,6 +176,13 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 		mdName = fmt.Sprintf("%s.md", utils.SanitizeFileName(title))
 	}
 	outputPath := filepath.Join(opts.outputDir, mdName)
+
+	// 检查是否需要跳过重复文件
+	if !opts.forceDownload && shouldSkipFile(outputPath, result, opts.skipDuplicate) {
+		fmt.Printf("⏭️  跳过重复文件: %s\n", title)
+		return nil
+	}
+
 	if err = os.WriteFile(outputPath, []byte(result), 0o644); err != nil {
 		return err
 	}
@@ -162,11 +212,12 @@ func downloadDocuments(ctx context.Context, client *core.Client, url string, opt
 			return err
 		}
 		localOpts := DownloadOpts{
-			outputDir: folderPath,
-			dump:      opts.dump,
-			batch:     false,
-			spaceID:   opts.spaceID,
-			nodeToken: opts.nodeToken,
+			outputDir:     folderPath,
+			dumpJSON:      opts.dumpJSON,
+			skipDuplicate: opts.skipDuplicate,
+			forceDownload: opts.forceDownload,
+			spaceID:       opts.spaceID,
+			nodeToken:     opts.nodeToken,
 		}
 		for _, file := range files {
 			if file.Type == "folder" {
@@ -248,11 +299,12 @@ func downloadWiki(ctx context.Context, client *core.Client, url string, opts *Do
 			}
 			if n.ObjType == "docx" {
 				wikiOpts := DownloadOpts{
-					outputDir: folderPath,
-					dump:      opts.dump,
-					batch:     false,
-					spaceID:   spaceID,
-					nodeToken: n.NodeToken,
+					outputDir:     folderPath,
+					dumpJSON:      opts.dumpJSON,
+					skipDuplicate: opts.skipDuplicate,
+					forceDownload: opts.forceDownload,
+					spaceID:       spaceID,
+					nodeToken:     n.NodeToken,
 				}
 				wg.Add(1)
 				semaphore <- struct{}{}
@@ -406,13 +458,12 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 				// 构建文档URL并下载
 				docURL := prefixURL + "/wiki/" + n.NodeToken
 				localOpts := DownloadOpts{
-					outputDir:    fullOutputDir,
-					dump:         opts.dump,
-					batch:        false,
-					wiki:         false,
-					wikiChildren: false,
-					spaceID:      spaceID,
-					nodeToken:    n.NodeToken,
+					outputDir:     fullOutputDir,
+					dumpJSON:      opts.dumpJSON,
+					skipDuplicate: opts.skipDuplicate,
+					forceDownload: opts.forceDownload,
+					spaceID:       spaceID,
+					nodeToken:     n.NodeToken,
 				}
 
 				// 移除冗余的下载路径输出
@@ -440,79 +491,139 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 	return nil
 }
 
-// handleDownloadCommand 是下载操作的主要处理程序
-// 它处理CLI标志、加载配置、验证凭据并启动适当的下载类型
-func handleDownloadCommand(cliCtx *cli.Context, url string) error {
-	// 提取下载配置的所有CLI标志
+// createCommonOpts 从CLI上下文创建通用的下载选项
+func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) {
+	// 提取CLI标志
 	appId := cliCtx.String("app-id")
 	appSecret := cliCtx.String("app-secret")
-	spaceId := cliCtx.String("space-id")
-	outputDir := cliCtx.String("output")
-	dump := cliCtx.Bool("dump")
-	batch := cliCtx.Bool("batch")
-	wiki := cliCtx.Bool("wiki")
-	wikiChildren := cliCtx.Bool("wiki-children")
-	titleAsFilename := cliCtx.Bool("title-as-filename")
-	imageDir := cliCtx.String("image-dir")
-	useHTMLTags := cliCtx.Bool("use-html-tags")
-	skipImgDownload := cliCtx.Bool("skip-img-download")
+	spaceId := cliCtx.String("space")
+	outputDir := cliCtx.String("out")
+	titleAsFilename := cliCtx.Bool("title-name")
+	imageDir := cliCtx.String("img-dir")
+	useHTML := cliCtx.Bool("html")
+	skipImages := cliCtx.Bool("no-img")
+	skipDuplicate := cliCtx.Bool("skip-same")
+	forceDownload := cliCtx.Bool("force")
+	dumpJSON := cliCtx.Bool("json")
 
-	// 加载配置，优先级：CLI参数 > 环境变量 > 默认值
+	// 加载配置
 	config, err := core.LoadConfig(appId, appSecret)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// 验证凭据
 	if config.Feishu.AppId == "" || config.Feishu.AppSecret == "" {
-		return cli.Exit("需要应用ID和应用密钥。请通过以下方式设置:\n"+
+		return nil, nil, cli.Exit("需要应用ID和应用密钥。请通过以下方式设置:\n"+
 			"  1. 命令行: --app-id <id> --app-secret <secret>\n"+
 			"  2. 环境变量: FEISHU_APP_ID 和 FEISHU_APP_SECRET", 1)
 	}
 
 	// 使用CLI标志覆盖配置
-	// titleAsFilename 现在默认为 true，可以被用户明确设置为 false
 	config.Output.TitleAsFilename = titleAsFilename
-	if useHTMLTags {
-		config.Output.UseHTMLTags = true
-	}
-	if skipImgDownload {
-		config.Output.SkipImgDownload = true
-	}
-	if imageDir != "img" { // 仅在用户提供非默认值时覆盖
+	config.Output.UseHTMLTags = useHTML
+	config.Output.SkipImgDownload = skipImages
+	if imageDir != "img" {
 		config.Output.ImageDir = imageDir
 	}
 
-	dlConfig = *config
-
-	// 设置下载选项
-	opts := DownloadOpts{
-		outputDir:    outputDir,
-		dump:         dump,
-		batch:        batch,
-		wiki:         wiki,
-		wikiChildren: wikiChildren,
-		spaceID:      spaceId, // 使用CLI参数或环境变量提供的spaceID
-		nodeToken:    "",      // 单个文档下载时通常不需要nodeToken
+	// 创建下载选项
+	opts := &DownloadOpts{
+		outputDir:     outputDir,
+		dumpJSON:      dumpJSON,
+		skipDuplicate: skipDuplicate,
+		forceDownload: forceDownload,
+		spaceID:       spaceId,
+		nodeToken:     "",
 	}
 
-	// 实例化客户端
-	client := core.NewClient(
-		config.Feishu.AppId, config.Feishu.AppSecret,
-	)
+	return opts, config, nil
+}
+
+// handleDocumentDownload 处理单个文档下载
+func handleDocumentDownload(cliCtx *cli.Context, url string) error {
+	opts, config, err := createCommonOpts(cliCtx)
+	if err != nil {
+		return err
+	}
+
+	dlConfig = *config
+	client := core.NewClient(config.Feishu.AppId, config.Feishu.AppSecret)
 	ctx := context.Background()
 
-	if batch {
-		return downloadDocuments(ctx, client, url, &opts)
+	return downloadDocument(ctx, client, url, opts)
+}
+
+// handleFolderDownload 处理文件夹批量下载
+func handleFolderDownload(cliCtx *cli.Context, url string) error {
+	opts, config, err := createCommonOpts(cliCtx)
+	if err != nil {
+		return err
 	}
 
-	if wiki {
-		return downloadWiki(ctx, client, url, &opts)
+	dlConfig = *config
+	client := core.NewClient(config.Feishu.AppId, config.Feishu.AppSecret)
+	ctx := context.Background()
+
+	return downloadDocuments(ctx, client, url, opts)
+}
+
+// handleWikiDownload 处理知识库完整下载
+func handleWikiDownload(cliCtx *cli.Context, url string) error {
+	opts, config, err := createCommonOpts(cliCtx)
+	if err != nil {
+		return err
 	}
 
-	if wikiChildren {
-		return downloadWikiChildren(ctx, client, url, &opts)
+	dlConfig = *config
+	client := core.NewClient(config.Feishu.AppId, config.Feishu.AppSecret)
+	ctx := context.Background()
+
+	return downloadWiki(ctx, client, url, opts)
+}
+
+// handleWikiTreeDownload 处理知识库子文档下载
+func handleWikiTreeDownload(cliCtx *cli.Context, url string) error {
+	opts, config, err := createCommonOpts(cliCtx)
+	if err != nil {
+		return err
 	}
 
-	return downloadDocument(ctx, client, url, &opts)
+	dlConfig = *config
+	client := core.NewClient(config.Feishu.AppId, config.Feishu.AppSecret)
+	ctx := context.Background()
+
+	return downloadWikiChildren(ctx, client, url, opts)
+}
+
+// handleLegacyDownload 处理遗留的智能下载命令（保持向后兼容）
+func handleLegacyDownload(cliCtx *cli.Context, url string) error {
+	fmt.Println("⚠️  使用了已废弃的命令，建议使用具体的子命令:")
+	fmt.Println("  - feishu2md document <url>  # 下载单个文档")
+	fmt.Println("  - feishu2md folder <url>    # 下载文件夹")
+	fmt.Println("  - feishu2md wiki <url>      # 下载知识库")
+	fmt.Println("  - feishu2md wiki-tree <url> # 下载子文档")
+	fmt.Println()
+
+	// 自动检测URL类型并使用相应的处理函数
+	if strings.Contains(url, "/drive/folder/") {
+		return handleFolderDownload(cliCtx, url)
+	}
+	if strings.Contains(url, "/wiki/space/") {
+		return handleWikiDownload(cliCtx, url)
+	}
+	if strings.Contains(url, "/wiki/") {
+		// 需要检查是否有space来决定是wiki-tree还是单文档
+		if cliCtx.String("space") != "" {
+			return handleWikiTreeDownload(cliCtx, url)
+		}
+	}
+
+	// 默认作为单文档处理
+	return handleDocumentDownload(cliCtx, url)
+}
+
+// handleDownloadCommand 是遗留的主要处理程序（保持向后兼容）
+func handleDownloadCommand(cliCtx *cli.Context, url string) error {
+	return handleLegacyDownload(cliCtx, url)
 }

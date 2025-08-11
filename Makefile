@@ -8,9 +8,11 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: build
 build:
-	go build -ldflags="$(LDFLAGS)" -o ./feishu2md cmd/*.go
+	rm -rf $(BIN_DIR)
+	@mkdir -p $(BIN_DIR)
+	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/feishu2md ./cmd
 ifneq ($(and $(COMPRESS),$(HAS_UPX)),)
-	upx -9 ./feishu2md
+	upx -9 $(BIN_DIR)/feishu2md
 endif
 
 .PHONY: test
@@ -181,4 +183,7 @@ package-windows-arm64: build-windows-arm64
 	zip -j $(BIN_DIR)/feishu2md_$(VERSION)_windows-arm64.zip $(BIN_DIR)/feishu2md-windows-arm64.exe >/dev/null
 
 .PHONY: package-all
-package-all: package-linux-amd64 package-linux-arm64 package-linux-386 package-linux-arm package-darwin-arm64 package-darwin-amd64 package-windows-amd64 package-windows-386 package-windows-arm64
+# 清空目标目录，仅生成各平台可执行文件（不再打包 tar/zip）
+package-all:
+	rm -rf $(BIN_DIR)
+	$(MAKE) build-bin

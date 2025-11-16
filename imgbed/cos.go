@@ -97,13 +97,47 @@ func (p *COSPlatform) BuildURL(filename string) string {
 func (p *COSPlatform) CheckExists(ctx context.Context, filename string) (bool, string) {
 	objectKey := p.getObjectKey(filename)
 	url := p.getObjectURL(objectKey)
-	
+
 	// 使用 Head 检查对象是否存在
 	_, err := p.client.Object.Head(ctx, objectKey, nil)
 	if err != nil {
 		// 如果出错（比如404），说明不存在
 		return false, url
 	}
-	
+
 	return true, url
+}
+
+// FindByPrefix 通过前缀查找文件（支持任意扩展名）
+func (p *COSPlatform) FindByPrefix(ctx context.Context, prefix string) (bool, string, string) {
+	// 构建对象前缀（带路径）
+	objectPrefix := p.getObjectKey(prefix)
+
+	// 使用 Get 方法列出对象
+	opt := &cos.BucketGetOptions{
+		Prefix:  objectPrefix,
+		MaxKeys: 10,
+	}
+
+	result, _, err := p.client.Bucket.Get(ctx, opt)
+	if err != nil {
+		return false, "", ""
+	}
+
+	// 查找第一个匹配的对象
+	for _, object := range result.Contents {
+		// 提取文件名（去除路径前缀）
+		filename := strings.TrimPrefix(object.Key, p.config.PrefixKey)
+		if strings.TrimPrefix(filename, "/") != "" {
+			filename = strings.TrimPrefix(filename, "/")
+		}
+		
+		// 检查是否以指定前缀开头
+		if strings.HasPrefix(filename, prefix) {
+			url := p.getObjectURL(object.Key)
+			return true, url, filename
+		}
+	}
+
+	return false, "", ""
 }

@@ -96,13 +96,51 @@ func (p *OSSPlatform) BuildURL(filename string) string {
 func (p *OSSPlatform) CheckExists(ctx context.Context, filename string) (bool, string) {
 	objectKey := p.getObjectKey(filename)
 	url := p.getObjectURL(objectKey)
-	
+
 	// 使用 IsObjectExist 检查对象是否存在
 	exists, err := p.bucket.IsObjectExist(objectKey)
 	if err != nil {
 		return false, url
 	}
-	
+
 	return exists, url
+}
+
+// FindByPrefix 通过前缀查找文件（支持任意扩展名）
+func (p *OSSPlatform) FindByPrefix(ctx context.Context, prefix string) (bool, string, string) {
+	// 构建对象前缀（带路径）
+	objectPrefix := p.getObjectKey(prefix)
+
+	// 使用 ListObjects 查找以该前缀开头的对象
+	marker := ""
+	for {
+		lsRes, err := p.bucket.ListObjects(oss.Prefix(objectPrefix), oss.Marker(marker), oss.MaxKeys(10))
+		if err != nil {
+			return false, "", ""
+		}
+
+		// 查找第一个匹配的对象
+		for _, object := range lsRes.Objects {
+			// 提取文件名（去除路径前缀）
+			filename := strings.TrimPrefix(object.Key, p.config.PrefixKey)
+			if strings.TrimPrefix(filename, "/") != "" {
+				filename = strings.TrimPrefix(filename, "/")
+			}
+			
+			// 检查是否以指定前缀开头
+			if strings.HasPrefix(filename, prefix) {
+				url := p.getObjectURL(object.Key)
+				return true, url, filename
+			}
+		}
+
+		// 如果没有更多结果，退出
+		if !lsRes.IsTruncated {
+			break
+		}
+		marker = lsRes.NextMarker
+	}
+
+	return false, "", ""
 }
 

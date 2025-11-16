@@ -21,6 +21,11 @@ type Platform interface {
 	// CheckExists 检查文件是否已存在于图床
 	// 返回 true 表示存在，并返回完整URL
 	CheckExists(ctx context.Context, filename string) (bool, string)
+
+	// FindByPrefix 通过前缀查找文件（不带扩展名）
+	// prefix: 文件token（不含扩展名）
+	// 返回 true 表示找到，并返回完整URL和文件名
+	FindByPrefix(ctx context.Context, prefix string) (bool, string, string)
 }
 
 // UploadResult 上传结果

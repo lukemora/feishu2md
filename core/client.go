@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/chyroc/lark"
-	"github.com/chyroc/lark_rate_limiter"
 )
 
 type Client struct {
 	larkClient *lark.Lark
+	limiter    *FeishuRateLimiter // 飞书API限流器
 }
 
 func NewClient(appID, appSecret string) *Client {
@@ -25,8 +25,9 @@ func NewClient(appID, appSecret string) *Client {
 		larkClient: lark.New(
 			lark.WithAppCredential(appID, appSecret),
 			lark.WithTimeout(60*time.Second),
-			lark.WithApiMiddleware(lark_rate_limiter.Wait(4, 4)),
+			// 移除SDK自带限流，使用我们的精确控制
 		),
+		limiter: NewFeishuRateLimiter(), // 100次/分钟, 5次/秒
 	}
 }
 
@@ -35,6 +36,11 @@ func (c *Client) DownloadImage(ctx context.Context, imgToken, outDir string) (st
 	if existingPath, ok := findExistingLocalImage(outDir, imgToken); ok {
 		relativePath := fmt.Sprintf("./%s/%s", filepath.Base(outDir), filepath.Base(existingPath))
 		return relativePath, nil
+	}
+
+	// 限流: 等待飞书API调用许可
+	if err := c.limiter.Wait(ctx); err != nil {
+		return imgToken, fmt.Errorf("限流等待失败: %v", err)
 	}
 
 	resp, _, err := c.larkClient.Drive.DownloadDriveMedia(ctx, &lark.DownloadDriveMediaReq{
@@ -134,6 +140,11 @@ func (c *Client) DownloadImageRaw(ctx context.Context, imgToken, imgDir string) 
 
 // GetDocxDocumentMeta 仅获取文档的基本信息（不拉取块列表），用于快速判断修订版本
 func (c *Client) GetDocxDocumentMeta(ctx context.Context, docToken string) (*lark.DocxDocument, error) {
+	// 限流: 等待飞书API调用许可
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("限流等待失败: %v", err)
+	}
+
 	resp, _, err := c.larkClient.Drive.GetDocxDocument(ctx, &lark.GetDocxDocumentReq{
 		DocumentID: docToken,
 	})
@@ -149,6 +160,11 @@ func (c *Client) GetDocxDocumentMeta(ctx context.Context, docToken string) (*lar
 }
 
 func (c *Client) GetDocxContent(ctx context.Context, docToken string) (*lark.DocxDocument, []*lark.DocxBlock, error) {
+	// 限流: 等待飞书API调用许可
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, nil, fmt.Errorf("限流等待失败: %v", err)
+	}
+
 	resp, _, err := c.larkClient.Drive.GetDocxDocument(ctx, &lark.GetDocxDocumentReq{
 		DocumentID: docToken,
 	})
@@ -163,6 +179,11 @@ func (c *Client) GetDocxContent(ctx context.Context, docToken string) (*lark.Doc
 	var blocks []*lark.DocxBlock
 	var pageToken *string
 	for {
+		// 每次分页调用都需要限流
+		if err := c.limiter.Wait(ctx); err != nil {
+			return docx, nil, fmt.Errorf("限流等待失败: %v", err)
+		}
+
 		resp2, _, err := c.larkClient.Drive.GetDocxBlockListOfDocument(ctx, &lark.GetDocxBlockListOfDocumentReq{
 			DocumentID: docx.DocumentID,
 			PageToken:  pageToken,
@@ -219,6 +240,11 @@ func (c *Client) GetDocxTimes(ctx context.Context, docToken string) (createdAt *
 }
 
 func (c *Client) GetWikiNodeInfo(ctx context.Context, token string) (*lark.GetWikiNodeRespNode, error) {
+	// 限流: 等待飞书API调用许可
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("限流等待失败: %v", err)
+	}
+
 	resp, _, err := c.larkClient.Drive.GetWikiNode(ctx, &lark.GetWikiNodeReq{
 		Token: token,
 	})
@@ -265,6 +291,11 @@ func (c *Client) GetWikiName(ctx context.Context, spaceID string) (string, error
 }
 
 func (c *Client) GetWikiNodeList(ctx context.Context, spaceID string, parentNodeToken *string) ([]*lark.GetWikiNodeListRespItem, error) {
+	// 限流: 等待飞书API调用许可
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("限流等待失败: %v", err)
+	}
+
 	resp, _, err := c.larkClient.Drive.GetWikiNodeList(ctx, &lark.GetWikiNodeListReq{
 		SpaceID:         spaceID,
 		PageSize:        nil,

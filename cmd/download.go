@@ -208,7 +208,6 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 
 	parser := core.NewParser(dlConfig.Output)
 
-	title := docx.Title
 	markdown := parser.ParseDocxContent(docx, blocks)
 
 	if !dlConfig.Output.SkipImgDownload && len(parser.ImgTokens) > 0 {
@@ -235,7 +234,8 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 		}
 
 		// 控制单文档内图片下载并发度
-		maxImgConcurrency := 8
+		// 提高到16个并发（限流器会自动控制）
+		maxImgConcurrency := 16
 		type result struct {
 			token, link string
 			fromImgbed  bool // 是否从图床直接获取
@@ -248,33 +248,31 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 
 		worker := func() {
 			for token := range jobs {
-				// 1. 先下载到本地（需要知道扩展名才能检查图床）
+				// 优化：如果启用图床，用token前缀查找（支持任意扩展名）
+				if uploader != nil {
+					platform := uploader.GetPlatform()
+
+					// 1. 通过前缀查找图床（无需猜测扩展名，无需调用飞书API！）
+					found, imgbedURL, _ := platform.FindByPrefix(ctx, token)
+					if found {
+						// 图床已存在，直接使用图床URL，完全跳过下载！⚡
+						results <- result{token: token, link: imgbedURL, fromImgbed: true, needUpload: false, err: nil}
+						continue
+					}
+				}
+
+				// 2. 图床不存在或未启用图床，从飞书下载
 				localLink, err := client.DownloadImage(ctx, token, outImgDir)
 				if err != nil {
 					results <- result{token: token, link: "", fromImgbed: false, needUpload: false, err: err}
 					continue
 				}
 
-				// 2. 如果启用了图床，检查图床是否已存在
+				// 3. 下载成功，如果启用了图床，标记需要上传
 				if uploader != nil {
-					// 提取文件名（包含扩展名）
-					filename := filepath.Base(localLink)
-					platform := uploader.GetPlatform()
-
-					// 检查图床是否存在
-					exists, imgbedURL := platform.CheckExists(ctx, filename)
-					if exists {
-						// 图床已存在，删除本地文件，直接使用图床URL
-						fullPath := filepath.Join(opts.outputDir, localLink)
-						os.Remove(fullPath)
-						results <- result{token: token, link: imgbedURL, fromImgbed: true, needUpload: false, err: nil}
-						continue
-					}
-
-					// 图床不存在，标记需要上传
 					results <- result{token: token, link: localLink, fromImgbed: false, needUpload: true, err: nil}
 				} else {
-					// 未启用图床，直接使用本地路径
+					// 未启用图床，使用本地路径
 					results <- result{token: token, link: localLink, fromImgbed: false, needUpload: false, err: nil}
 				}
 			}
@@ -339,18 +337,11 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 					}
 				}
 
-				if uploadedCount > 0 {
-					fmt.Printf("   ├─ 图床: 上传 %d 张（跳过 %d 张已存在）\n", uploadedCount, imgbedHitCount)
-				}
-
 				// 尝试删除空的图片目录
 				imgDir := filepath.Join(opts.outputDir, dlConfig.Output.ImageDir)
 				if entries, err := os.ReadDir(imgDir); err == nil && len(entries) == 0 {
 					os.Remove(imgDir)
 				}
-			} else if imgbedHitCount > 0 {
-				// 所有图片都从图床获取
-				fmt.Printf("   ├─ 图床: 跳过 %d 张（已存在）\n", imgbedHitCount)
 			}
 
 			// 替换markdown中的token为最终链接（本地链接或图床链接）
@@ -358,12 +349,10 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 				markdown = strings.ReplaceAll(markdown, token, link)
 			}
 
-			totalImages := successCount + imgbedHitCount
-			if failedTokens > 0 {
-				fmt.Printf("   ├─ 图片: 共 %d 张, 失败 %d\n", totalImages, failedTokens)
-			}
 			if dlStats != nil {
-				downloaded := successCount
+				// 注意：successCount 包含从飞书下载的图片（需要上传的）
+				// imgbedHitCount 是从图床直接获取的（不算新增）
+				downloaded := len(needUploadImages) // 只有需要上传的才是真正新下载的
 				dlStats.AddImages(len(uniqueTokens), downloaded)
 				// 把图片统计合并到当前文档日志（最后汇总输出）
 				pathForLog := mdName
@@ -471,14 +460,14 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 
 	// 检查是否需要跳过重复文件
 	if !opts.forceDownload && shouldSkipFile(outputPath, result, opts.skipDuplicate) {
-		fmt.Printf("⏭️  跳过重复文件: %s\n", title)
+		// 静默跳过，不输出日志
 		return nil
 	}
 
 	if err = os.WriteFile(outputPath, []byte(result), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("✅ %s\n", title)
+	// 静默完成，不输出日志（在最后统计输出）
 	if dlStats != nil {
 		dlStats.AddDocNew()
 		// 记录文档新增日志（图片统计在前面 AddImages 已做累加）
@@ -639,6 +628,8 @@ func downloadWiki(ctx context.Context, client *core.Client, url string, opts *Do
 
 // downloadWikiChildren 下载指定知识库文档下的所有子文档
 func downloadWikiChildren(ctx context.Context, client *core.Client, url string, opts *DownloadOpts) error {
+	startTime := time.Now()
+
 	// 优先使用配置中的spaceID，然后使用环境变量
 	spaceID := opts.spaceID
 	if spaceID == "" {
@@ -729,7 +720,10 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 	buildPaths(nodeToken, ".")
 
 	// 并发下载控制
-	var maxConcurrency = 10
+	// 提高并发度到20：限流器(100次/分钟+5次/秒)会自动控制API调用速率
+	// 20个并发文档 × 平均3次API调用/文档 = 约60次并发API调用
+	// 限流器会将其平滑到安全范围内
+	var maxConcurrency = 20
 	errChan := make(chan error, len(allNodes))
 	wg := sync.WaitGroup{}
 	semaphore := make(chan struct{}, maxConcurrency)
@@ -794,6 +788,9 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 		}
 	}
 
+	// 计算总耗时
+	elapsed := time.Since(startTime)
+
 	// 统计汇总输出（整洁格式）
 	fmt.Println()
 	fmt.Println("📦 处理结果：")
@@ -818,9 +815,9 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 	totalDocs, docsNew, totalImages, imagesNew := dlStats.Snapshot()
 	changes := docsNew + imagesNew
 	if changes == 0 {
-		fmt.Printf("🎉 完成！共 %d 个文档、%d 张图片，全部已缓存、无更新\n", totalDocs, totalImages)
+		fmt.Printf("🎉 完成！共 %d 个文档、%d 张图片，全部已缓存、无更新。耗时: %.2fs\n", totalDocs, totalImages, elapsed.Seconds())
 	} else {
-		fmt.Printf("🎉 完成！共 %d 个文档、%d 张图片，其中新增文档 %d、新增图片 %d，共 %d 处变更\n", totalDocs, totalImages, docsNew, imagesNew, changes)
+		fmt.Printf("🎉 完成！共 %d 个文档、%d 张图片，其中新增文档 %d、新增图片 %d，共 %d 处变更。耗时: %.2fs\n", totalDocs, totalImages, docsNew, imagesNew, changes, elapsed.Seconds())
 	}
 	return nil
 }

@@ -38,19 +38,6 @@ func main() {
 				Value:   ".env",
 			},
 
-			// === 输出配置 ===
-			&cli.StringFlag{
-				Name:    "out",
-				Aliases: []string{"o"},
-				Value:   "./dist",
-				Usage:   "下载目录",
-			},
-			&cli.StringFlag{
-				Name:  "img-dir",
-				Usage: "图片目录 (相对于下载目录)",
-				Value: "img",
-			},
-
 			// === 文件选项 ===
 			&cli.BoolFlag{
 				Name:    "title-name",

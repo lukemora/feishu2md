@@ -21,6 +21,7 @@ type FeishuConfig struct {
 
 // OutputConfig 包含文档输出格式设置
 type OutputConfig struct {
+	OutputDir       string // 文档输出目录
 	ImageDir        string // 存储下载图片的目录
 	TitleAsFilename bool   // 使用文档标题作为文件名而不是令牌
 	UseHTMLTags     bool   // 使用HTML标签而不是markdown进行某些格式化
@@ -48,10 +49,11 @@ func NewConfig(appId, appSecret string) *Config {
 			AppSecret: appSecret,
 		},
 		Output: OutputConfig{
-			ImageDir:        "img", // 默认图片目录
-			TitleAsFilename: true,  // 默认使用文档标题作为文件名
-			UseHTMLTags:     false, // 默认使用markdown格式
-			SkipImgDownload: false, // 默认下载图片
+			OutputDir:       "./dist", // 默认输出目录
+			ImageDir:        "img",    // 默认图片目录
+			TitleAsFilename: true,     // 默认使用文档标题作为文件名
+			UseHTMLTags:     false,    // 默认使用markdown格式
+			SkipImgDownload: false,    // 默认下载图片
 		},
 	}
 }
@@ -78,10 +80,25 @@ func LoadConfig(appId, appSecret string) (*Config, error) {
 		config.Feishu.AppSecret = appSecret
 	}
 
+	// 加载输出配置（从环境变量）
+	loadOutputConfig(config)
+
 	// 加载图床配置（从环境变量）
 	loadImageBedConfig(config)
 
 	return config, nil
+}
+
+// loadOutputConfig 从环境变量加载输出配置
+func loadOutputConfig(config *Config) {
+	// 输出目录
+	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
+		config.Output.OutputDir = outputDir
+	}
+	// 图片目录
+	if imageDir := os.Getenv("IMAGE_DIR"); imageDir != "" {
+		config.Output.ImageDir = imageDir
+	}
 }
 
 // loadImageBedConfig 从环境变量加载图床配置

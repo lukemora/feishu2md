@@ -33,6 +33,17 @@ FEISHU_APP_SECRET=your_app_secret_here
 # 如果配置了此项，运行 wiki-tree 命令时可以不提供 URL 参数
 # FEISHU_FOLDER_TOKEN=https://xxx.feishu.cn/wiki/your_node_token
 
+# ----------------------------------
+# 输出配置（可选）
+# ----------------------------------
+# 文档输出目录
+# 默认: ./dist
+# OUTPUT_DIR=./dist
+
+# 图片目录（相对于输出目录）
+# 默认: img
+# IMAGE_DIR=img
+
 
 # ====================================
 # 图床配置（可选）

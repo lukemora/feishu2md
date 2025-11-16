@@ -834,9 +834,7 @@ func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) 
 
 	// 提取CLI标志
 	spaceId := os.Getenv("FEISHU_SPACE_ID")
-	outputDir := cliCtx.String("out")
 	titleAsFilename := cliCtx.Bool("title-name")
-	imageDir := cliCtx.String("img-dir")
 	useHTML := cliCtx.Bool("html")
 	skipImages := cliCtx.Bool("no-img")
 	skipDuplicate := cliCtx.Bool("skip-same")
@@ -861,13 +859,10 @@ func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) 
 	config.Output.TitleAsFilename = titleAsFilename
 	config.Output.UseHTMLTags = useHTML
 	config.Output.SkipImgDownload = skipImages
-	if imageDir != "img" {
-		config.Output.ImageDir = imageDir
-	}
 
 	// 创建下载选项
 	opts := &DownloadOpts{
-		outputDir:     outputDir,
+		outputDir:     config.Output.OutputDir,
 		dumpJSON:      dumpJSON,
 		skipDuplicate: skipDuplicate,
 		forceDownload: forceDownload,

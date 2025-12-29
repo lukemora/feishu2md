@@ -15,7 +15,7 @@
 | 🖼️ **智能图片处理** | 自动下载图片，支持本地保存或上传图床 |
 | ☁️ **图床自动上传** | 支持阿里云 OSS、腾讯云 COS，自动替换图片链接 |
 | 🌳 **保持文档结构** | 递归下载时保持原有层级结构 |
-| 🏷️ **层级元数据** | 自动从目录结构生成 tags 和 categories，支持多层级 |
+| 🏷️ **层级元数据** | 自动从目录结构生成 tags 和 categories，支持灵活的层级选择 |
 | ⚡ **高效并发** | 支持多线程并发下载，智能限流 |
 | 📝 **友好文件名** | 默认使用文档标题，智能处理特殊字符 |
 | 🎯 **格式完整** | 完整支持表格、列表、代码块等 Markdown 格式 |
@@ -106,54 +106,54 @@ IMGBED_PREFIX_KEY=images/
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--config`, `-c` | 配置文件路径 | `.env` |
-| `--out`, `-o` | 输出目录 | `./dist` |
-| `--img-dir` | 图片目录 | `img` |
 | `--title-name`, `-t` | 使用标题作为文件名 | `true` |
 | `--skip-same`, `-s` | 跳过重复文件（MD5检查） | `true` |
 | `--force`, `-f` | 强制下载 | `false` |
 | `--no-img` | 跳过图片下载 | `false` |
 | `--html` | 使用 HTML 而非 Markdown | `false` |
 | `--json` | 导出 JSON 响应 | `false` |
-| `--tag-mode` | 标签生成模式: `last`(最后一层) / `all`(所有层级) | `last` |
-| `--category-mode` | 分类生成模式: `last`(最后一层) / `all`(所有层级) | `last` |
 
-### 元数据生成模式
+### wiki-tree 专用选项
 
-`--tag-mode` 和 `--category-mode` 参数控制如何从文档路径生成 frontmatter 中的 tags 和 categories。
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--category-level` | 分类层级：正数从外向内(1=第一层)，负数从内向外(-1=最后一层) | `1` |
+| `--no-body-title` | 禁用正文开头的 H1 标题（因为 frontmatter 已含 title） | `false` |
+
+### 层级分类示例
+
+`--category-level` 参数控制如何从文档路径生成 frontmatter 中的 categories。
 
 **示例**：假设文档路径为 `技术/后端/Go语言/并发编程.md`
 
-| 模式 | tags | categories |
-|------|------|------------|
-| `--tag-mode=last --category-mode=last` | `["Go语言"]` | `["Go语言"]` |
-| `--tag-mode=all --category-mode=last` | `["技术", "后端", "Go语言"]` | `["Go语言"]` |
-| `--tag-mode=last --category-mode=all` | `["Go语言"]` | `["技术", "后端", "Go语言"]` |
-| `--tag-mode=all --category-mode=all` | `["技术", "后端", "Go语言"]` | `["技术", "后端", "Go语言"]` |
+| 参数值 | categories |
+|--------|------------|
+| `--category-level=1` | `技术`（第1层） |
+| `--category-level=2` | `后端`（第2层） |
+| `--category-level=-1` | `Go语言`（最后一层） |
+| `--category-level=-2` | `后端`（倒数第2层） |
 
 **使用示例**：
 
 ```bash
-# 默认模式（只取最后一层目录）
+# 默认：取第1层目录作为分类
 ./feishu2md wiki-tree
 
-# 取所有层级作为 tags 和 categories
-./feishu2md wiki-tree --tag-mode=all --category-mode=all
+# 取最后一层目录作为分类
+./feishu2md wiki-tree --category-level=-1
 
-# 混合模式：tags 取所有层级，categories 只取最后一层
-./feishu2md wiki-tree --tag-mode=all --category-mode=last
+# 取倒数第2层目录作为分类，同时禁用正文 H1 标题
+./feishu2md wiki-tree --category-level=-2 --no-body-title
 ```
 
-**生成的 frontmatter 示例**（`--tag-mode=all --category-mode=all`）：
+**生成的 frontmatter 示例**：
 
 ```yaml
 ---
 title: "并发编程"
 date: 2025-01-01T12:00:00+08:00
 updated: 2025-01-01T12:00:00+08:00
-categories:
-  - 技术
-  - 后端
-  - Go语言
+categories: Go语言
 tags:
   - 技术
   - 后端
@@ -246,11 +246,10 @@ IMGBED_PREFIX_KEY=blog/images/
 # 基础用法
 ./feishu2md document https://xxx.feishu.cn/docx/abc123
 
-# 指定输出目录
-./feishu2md document https://xxx.feishu.cn/docx/abc123 --out ./docs
+# 跳过图片下载
+./feishu2md document https://xxx.feishu.cn/docx/abc123 --no-img
 
-# 启用图床上传
-# 在 .env 中配置 IMGBED_ENABLED=true
+# 启用图床上传（需在 .env 中配置 IMGBED_ENABLED=true）
 ./feishu2md document https://xxx.feishu.cn/docx/abc123
 ```
 
@@ -306,8 +305,14 @@ FEISHU_FOLDER_TOKEN=https://xxx.feishu.cn/wiki/MekRwTsI9izbqbk
 # 或指定 URL（会覆盖配置文件）
 ./feishu2md wiki-tree https://xxx.feishu.cn/wiki/another_node
 
-# 启用层级元数据：将目录结构作为 tags 和 categories
-./feishu2md wiki-tree --tag-mode=all --category-mode=all
+# 取倒数第2层目录作为分类
+./feishu2md wiki-tree --category-level=-2
+
+# 禁用正文 H1 标题（因为 frontmatter 已含 title）
+./feishu2md wiki-tree --no-body-title
+
+# 组合使用
+./feishu2md wiki-tree --category-level=-2 --no-body-title
 ```
 
 **特性**：
@@ -316,7 +321,7 @@ FEISHU_FOLDER_TOKEN=https://xxx.feishu.cn/wiki/MekRwTsI9izbqbk
 - ✅ 智能跳过有子文档的父级文档
 - ✅ 并发下载（最大20个并发）
 - ✅ 智能去重，避免重复下载
-- ✅ 层级元数据生成（tags/categories 支持多层级）
+- ✅ 层级元数据生成（tags 取所有层级，categories 按 `--category-level` 指定）
 
 **输出结构**：
 ```

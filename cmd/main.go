@@ -66,10 +66,6 @@ func main() {
 				Name:  "html",
 				Usage: "使用HTML而非Markdown",
 			},
-			&cli.BoolFlag{
-				Name:  "no-body-title",
-				Usage: "禁用正文开头的H1标题（frontmatter已含title）",
-			},
 
 			// === 调试选项 ===
 			&cli.BoolFlag{
@@ -214,6 +210,10 @@ func main() {
 						Name:  "category-level",
 						Usage: "分类取第几层目录: 正数从外向内(1=第一层), 负数从内向外(-1=最后一层), 层级不够时回退到最近层",
 						Value: 1,
+					},
+					&cli.BoolFlag{
+						Name:  "no-body-title",
+						Usage: "禁用正文开头的H1标题（frontmatter已含title）",
 					},
 				},
 				Action: handleWikiTreeCommand,

@@ -25,15 +25,17 @@ import (
 
 // DownloadOpts 包含下载操作的选项
 type DownloadOpts struct {
-	outputDir     string // 文件保存的目录
-	dumpJSON      bool   // 是否转储API的JSON响应
-	skipDuplicate bool   // 是否跳过重复文件
-	forceDownload bool   // 是否强制下载
-	spaceID       string // 知识库空间ID（用于检查子节点）
-	nodeToken     string // 当前节点令牌（用于检查子节点）
-	relDir        string // 相对根输出目录的路径（仅 wiki-tree 用于日志排序）
-	tags          []string
-	category      string // 文档分类（从路径第一层目录推导）
+	outputDir     string   // 文件保存的目录
+	dumpJSON      bool     // 是否转储API的JSON响应
+	skipDuplicate bool     // 是否跳过重复文件
+	forceDownload bool     // 是否强制下载
+	spaceID       string   // 知识库空间ID（用于检查子节点）
+	nodeToken     string   // 当前节点令牌（用于检查子节点）
+	relDir        string   // 相对根输出目录的路径（仅 wiki-tree 用于日志排序）
+	tags          []string // 标签列表
+	categories    []string // 分类列表（支持多层级）
+	tagMode       string   // 标签模式: "last"(只取最后一层) / "all"(取所有层级)
+	categoryMode  string   // 分类模式: "last"(只取最后一层) / "all"(取所有层级)
 }
 
 // calculateMD5 计算字符串的MD5哈希值
@@ -143,12 +145,28 @@ func (lc *LogCollector) SortedByPath() []DocLog {
 
 var logCollector = &LogCollector{}
 
-func deriveTagsFromPath(relPath string) []string {
+// deriveTagsFromPath 根据 tagMode 从相对路径推导标签
+// tagMode="last": 只取最后一层目录作为 tag（默认行为）
+// tagMode="all": 取路径的所有层级目录作为 tags
+func deriveTagsFromPath(relPath string, tagMode string) []string {
 	cleanPath := filepath.Clean(relPath)
 	if cleanPath == "." || cleanPath == string(os.PathSeparator) || cleanPath == "" {
 		return nil
 	}
-	// 只取直接父目录作为 tag
+
+	if tagMode == "all" {
+		// 取所有层级目录
+		parts := strings.Split(cleanPath, string(os.PathSeparator))
+		var tags []string
+		for _, part := range parts {
+			if part != "" && part != "." {
+				tags = append(tags, part)
+			}
+		}
+		return tags
+	}
+
+	// 默认: 只取直接父目录作为 tag
 	parentDir := filepath.Base(cleanPath)
 	if parentDir == "" || parentDir == "." {
 		return nil
@@ -156,21 +174,33 @@ func deriveTagsFromPath(relPath string) []string {
 	return []string{parentDir}
 }
 
-// deriveCategoryFromPath 从相对路径推导分类
-// 返回路径的最后一层目录作为 category（与 tag 保持一致）
-// 如：wiki-tree 下文档 docs/a/b/c.md 其 relPath 为 "docs/a/b"
-// 返回 "b"（最具体的分类）
-func deriveCategoryFromPath(relPath string) string {
+// deriveCategoriesFromPath 根据 categoryMode 从相对路径推导分类
+// categoryMode="last": 返回单元素数组，只包含最后一层目录
+// categoryMode="all": 返回所有层级目录
+func deriveCategoriesFromPath(relPath string, categoryMode string) []string {
 	cleanPath := filepath.Clean(relPath)
 	if cleanPath == "." || cleanPath == string(os.PathSeparator) || cleanPath == "" {
-		return ""
+		return nil
 	}
-	// 取最后一层目录（即直接父目录）
+
+	if categoryMode == "all" {
+		// 取所有层级目录
+		parts := strings.Split(cleanPath, string(os.PathSeparator))
+		var categories []string
+		for _, part := range parts {
+			if part != "" && part != "." {
+				categories = append(categories, part)
+			}
+		}
+		return categories
+	}
+
+	// 默认: 只取最后一层目录
 	parentDir := filepath.Base(cleanPath)
 	if parentDir == "" || parentDir == "." {
-		return ""
+		return nil
 	}
-	return parentDir
+	return []string{parentDir}
 }
 
 // downloadDocument 下载单个飞书文档并转换为Markdown
@@ -430,15 +460,24 @@ func downloadDocument(ctx context.Context, client *core.Client, url string, opts
 	fmBuilder.WriteString("title: " + escapeYAML(fmTitle) + "\n")
 	fmBuilder.WriteString("date: " + fmDate + "\n")
 	fmBuilder.WriteString("updated: " + fmUpdated + "\n")
-	// categories: 使用提供的 category，或从第一个 tag 推导，或使用文档标题的第一个词
-	fmCategory := opts.category
-	if fmCategory == "" && len(opts.tags) > 0 {
-		fmCategory = opts.tags[0] // 使用第一个 tag 作为 category
+
+	// categories: 使用提供的 categories，或从 tags 推导，或使用默认分类
+	fmCategories := opts.categories
+	if len(fmCategories) == 0 && len(opts.tags) > 0 {
+		fmCategories = opts.tags // 使用 tags 作为 categories
 	}
-	if fmCategory == "" {
-		fmCategory = "未分类" // 默认分类
+	if len(fmCategories) == 0 {
+		fmCategories = []string{"未分类"} // 默认分类
 	}
-	fmBuilder.WriteString("categories: " + escapeYAML(fmCategory) + "\n")
+	fmBuilder.WriteString("categories:\n")
+	for _, cat := range fmCategories {
+		if strings.TrimSpace(cat) == "" {
+			continue
+		}
+		fmBuilder.WriteString("  - " + escapeYAML(cat) + "\n")
+	}
+
+	// tags: 输出标签列表
 	if len(opts.tags) > 0 {
 		fmBuilder.WriteString("tags:\n")
 		for _, tag := range opts.tags {
@@ -793,8 +832,10 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 					spaceID:       spaceID,
 					nodeToken:     n.NodeToken,
 					relDir:        nodePath,
-					tags:          deriveTagsFromPath(nodePath),
-					category:      deriveCategoryFromPath(nodePath),
+					tagMode:       opts.tagMode,
+					categoryMode:  opts.categoryMode,
+					tags:          deriveTagsFromPath(nodePath, opts.tagMode),
+					categories:    deriveCategoriesFromPath(nodePath, opts.categoryMode),
 				}
 
 				// 移除冗余的下载路径输出
@@ -870,6 +911,8 @@ func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) 
 	skipDuplicate := cliCtx.Bool("skip-same")
 	forceDownload := cliCtx.Bool("force")
 	dumpJSON := cliCtx.Bool("json")
+	tagMode := cliCtx.String("tag-mode")
+	categoryMode := cliCtx.String("category-mode")
 
 	// 加载配置
 	config, err := core.LoadConfig("", "")
@@ -898,6 +941,8 @@ func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) 
 		forceDownload: forceDownload,
 		spaceID:       spaceId,
 		nodeToken:     "",
+		tagMode:       tagMode,
+		categoryMode:  categoryMode,
 	}
 
 	return opts, config, nil

@@ -15,6 +15,7 @@
 | 🖼️ **智能图片处理** | 自动下载图片，支持本地保存或上传图床 |
 | ☁️ **图床自动上传** | 支持阿里云 OSS、腾讯云 COS，自动替换图片链接 |
 | 🌳 **保持文档结构** | 递归下载时保持原有层级结构 |
+| 🏷️ **层级元数据** | 自动从目录结构生成 tags 和 categories，支持多层级 |
 | ⚡ **高效并发** | 支持多线程并发下载，智能限流 |
 | 📝 **友好文件名** | 默认使用文档标题，智能处理特殊字符 |
 | 🎯 **格式完整** | 完整支持表格、列表、代码块等 Markdown 格式 |
@@ -113,6 +114,53 @@ IMGBED_PREFIX_KEY=images/
 | `--no-img` | 跳过图片下载 | `false` |
 | `--html` | 使用 HTML 而非 Markdown | `false` |
 | `--json` | 导出 JSON 响应 | `false` |
+| `--tag-mode` | 标签生成模式: `last`(最后一层) / `all`(所有层级) | `last` |
+| `--category-mode` | 分类生成模式: `last`(最后一层) / `all`(所有层级) | `last` |
+
+### 元数据生成模式
+
+`--tag-mode` 和 `--category-mode` 参数控制如何从文档路径生成 frontmatter 中的 tags 和 categories。
+
+**示例**：假设文档路径为 `技术/后端/Go语言/并发编程.md`
+
+| 模式 | tags | categories |
+|------|------|------------|
+| `--tag-mode=last --category-mode=last` | `["Go语言"]` | `["Go语言"]` |
+| `--tag-mode=all --category-mode=last` | `["技术", "后端", "Go语言"]` | `["Go语言"]` |
+| `--tag-mode=last --category-mode=all` | `["Go语言"]` | `["技术", "后端", "Go语言"]` |
+| `--tag-mode=all --category-mode=all` | `["技术", "后端", "Go语言"]` | `["技术", "后端", "Go语言"]` |
+
+**使用示例**：
+
+```bash
+# 默认模式（只取最后一层目录）
+./feishu2md wiki-tree
+
+# 取所有层级作为 tags 和 categories
+./feishu2md wiki-tree --tag-mode=all --category-mode=all
+
+# 混合模式：tags 取所有层级，categories 只取最后一层
+./feishu2md wiki-tree --tag-mode=all --category-mode=last
+```
+
+**生成的 frontmatter 示例**（`--tag-mode=all --category-mode=all`）：
+
+```yaml
+---
+title: "并发编程"
+date: 2025-01-01T12:00:00+08:00
+updated: 2025-01-01T12:00:00+08:00
+categories:
+  - 技术
+  - 后端
+  - Go语言
+tags:
+  - 技术
+  - 后端
+  - Go语言
+id: xxxxx
+---
+```
 
 ---
 
@@ -257,14 +305,18 @@ FEISHU_FOLDER_TOKEN=https://xxx.feishu.cn/wiki/MekRwTsI9izbqbk
 
 # 或指定 URL（会覆盖配置文件）
 ./feishu2md wiki-tree https://xxx.feishu.cn/wiki/another_node
+
+# 启用层级元数据：将目录结构作为 tags 和 categories
+./feishu2md wiki-tree --tag-mode=all --category-mode=all
 ```
 
 **特性**：
 - ✅ 递归获取所有层级的子文档
 - ✅ 自动创建文件夹层级结构
 - ✅ 智能跳过有子文档的父级文档
-- ✅ 并发下载（最大10个并发）
+- ✅ 并发下载（最大20个并发）
 - ✅ 智能去重，避免重复下载
+- ✅ 层级元数据生成（tags/categories 支持多层级）
 
 **输出结构**：
 ```

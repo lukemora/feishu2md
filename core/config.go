@@ -26,6 +26,7 @@ type OutputConfig struct {
 	TitleAsFilename bool   // 使用文档标题作为文件名而不是令牌
 	UseHTMLTags     bool   // 使用HTML标签而不是markdown进行某些格式化
 	SkipImgDownload bool   // 跳过下载图片并保留原始链接
+	NoBodyTitle     bool   // 禁用正文开头的 H1 标题（因为 frontmatter 已包含 title）
 }
 
 // ImageBedConfig 包含图床配置

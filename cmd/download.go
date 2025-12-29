@@ -910,6 +910,7 @@ func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) 
 	titleAsFilename := cliCtx.Bool("title-name")
 	useHTML := cliCtx.Bool("html")
 	skipImages := cliCtx.Bool("no-img")
+	noBodyTitle := cliCtx.Bool("no-body-title")
 	skipDuplicate := cliCtx.Bool("skip-same")
 	forceDownload := cliCtx.Bool("force")
 	dumpJSON := cliCtx.Bool("json")
@@ -933,6 +934,7 @@ func createCommonOpts(cliCtx *cli.Context) (*DownloadOpts, *core.Config, error) 
 	config.Output.TitleAsFilename = titleAsFilename
 	config.Output.UseHTMLTags = useHTML
 	config.Output.SkipImgDownload = skipImages
+	config.Output.NoBodyTitle = noBodyTitle
 
 	// 创建下载选项
 	opts := &DownloadOpts{

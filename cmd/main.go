@@ -66,6 +66,10 @@ func main() {
 				Name:  "html",
 				Usage: "使用HTML而非Markdown",
 			},
+			&cli.BoolFlag{
+				Name:  "no-body-title",
+				Usage: "禁用正文开头的H1标题（frontmatter已含title）",
+			},
 
 			// === 调试选项 ===
 			&cli.BoolFlag{

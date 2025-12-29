@@ -12,6 +12,7 @@ import (
 
 type Parser struct {
 	useHTMLTags bool
+	noBodyTitle bool
 	ImgTokens   []string
 	blockMap    map[string]*lark.DocxBlock
 }
@@ -19,6 +20,7 @@ type Parser struct {
 func NewParser(config OutputConfig) *Parser {
 	return &Parser{
 		useHTMLTags: config.UseHTMLTags,
+		noBodyTitle: config.NoBodyTitle,
 		ImgTokens:   make([]string, 0),
 		blockMap:    make(map[string]*lark.DocxBlock),
 	}
@@ -195,9 +197,12 @@ func (p *Parser) ParseDocxBlock(b *lark.DocxBlock, indentLevel int) string {
 func (p *Parser) ParseDocxBlockPage(b *lark.DocxBlock) string {
 	buf := new(strings.Builder)
 
-	buf.WriteString("# ")
-	buf.WriteString(p.ParseDocxBlockText(b.Page))
-	buf.WriteString("\n")
+	// 仅当未禁用正文 H1 标题时才输出
+	if !p.noBodyTitle {
+		buf.WriteString("# ")
+		buf.WriteString(p.ParseDocxBlockText(b.Page))
+		buf.WriteString("\n")
+	}
 
 	for _, childId := range b.Children {
 		childBlock := p.blockMap[childId]

@@ -51,21 +51,27 @@ func UploadWithContext(ctx context.Context, filePath string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
-	// 执行 picgo 命令（-s 静默模式）
-	cmd := exec.CommandContext(ctx, "picgo", "u", filePath, "-s")
+	// 执行 picgo 命令（不使用静默模式，以便获取完整输出）
+	cmd := exec.CommandContext(ctx, "picgo", "u", filePath)
 	output, err := cmd.CombinedOutput()
+	outputStr := strings.TrimSpace(string(output))
+
 	if err != nil {
 		// 检查是否超时
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("上传超时（%v）: %s", DefaultTimeout, filePath)
 		}
-		return "", fmt.Errorf("picgo 上传失败: %v\n输出: %s", err, string(output))
+		return "", fmt.Errorf("picgo 上传失败: %v\n输出: %s", err, outputStr)
 	}
 
 	// 解析 URL
-	url := extractURL(string(output))
+	url := extractURL(outputStr)
 	if url == "" {
-		return "", fmt.Errorf("未能从输出中解析 URL: %s", string(output))
+		// 输出更详细的调试信息
+		if outputStr == "" {
+			return "", fmt.Errorf("picgo 无输出，请检查配置: picgo config")
+		}
+		return "", fmt.Errorf("未能从输出中解析 URL，picgo 输出:\n%s", outputStr)
 	}
 
 	return url, nil

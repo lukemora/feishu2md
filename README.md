@@ -244,7 +244,7 @@ PICGO_ENABLED=true
 
 ### 缓存说明
 
-PicGo 上传成功后，会在 `~/.feishu2md/upload-cache.json` 保存映射：
+PicGo 上传成功后，会在当前工作目录的 `.feishu2md/upload-cache.json` 保存映射（便于跟随仓库提交）：
 
 ```json
 {
@@ -458,7 +458,7 @@ A: 检查以下步骤：
 A: 删除缓存文件：
 
 ```bash
-rm ~/.feishu2md/upload-cache.json
+rm .feishu2md/upload-cache.json
 ```
 
 </details>

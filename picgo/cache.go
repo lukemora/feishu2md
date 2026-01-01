@@ -1,5 +1,6 @@
 // Package picgo - 上传缓存管理
 // 维护 token -> URL 的映射，避免重复上传
+// 缓存存储在当前工作目录的 .feishu2md/ 下，便于跟随仓库提交
 package picgo
 
 import (
@@ -9,7 +10,7 @@ import (
 	"sync"
 )
 
-// 缓存文件路径
+// 缓存文件路径（相对于当前工作目录）
 var (
 	cacheDir  string
 	cacheFile string
@@ -24,13 +25,15 @@ var (
 )
 
 // initCachePath 初始化缓存路径
+// 缓存存储在当前工作目录的 .feishu2md/ 下
 func initCachePath() {
 	cacheOnce.Do(func() {
-		home, err := os.UserHomeDir()
+		// 使用当前工作目录，便于缓存跟随仓库
+		cwd, err := os.Getwd()
 		if err != nil {
-			home = "."
+			cwd = "."
 		}
-		cacheDir = filepath.Join(home, ".feishu2md")
+		cacheDir = filepath.Join(cwd, ".feishu2md")
 		cacheFile = filepath.Join(cacheDir, "upload-cache.json")
 	})
 }

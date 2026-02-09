@@ -35,6 +35,7 @@ type DownloadOpts struct {
 	tags          []string // 标签列表（从路径所有层级推导）
 	category      string   // 分类（单个，从路径指定层级推导）
 	categoryLevel int      // 分类层级: 正数从外向内(1=第一层), 负数从内向外(-1=最后一层)
+	cleanOutput   bool     // wiki-tree：同步前清空输出目录，再按最新树生成，避免旧文件残留
 }
 
 // calculateMD5 计算字符串的MD5哈希值
@@ -726,6 +727,19 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 
 	fmt.Printf("🔍 正在获取子文档...\n")
 
+	// 可选：先清空输出目录，再按最新树生成，避免重命名/删除导致的旧文件残留
+	if opts.cleanOutput && opts.outputDir != "" {
+		if _, err := os.Stat(opts.outputDir); err == nil {
+			if err := os.RemoveAll(opts.outputDir); err != nil {
+				return fmt.Errorf("清空输出目录失败: %w", err)
+			}
+			fmt.Printf("🧹 已清空输出目录: %s\n", opts.outputDir)
+		}
+	}
+	if err := os.MkdirAll(opts.outputDir, 0o755); err != nil {
+		return fmt.Errorf("创建输出目录失败: %w", err)
+	}
+
 	// 获取所有子节点
 	allNodes, err := client.GetAllChildNodes(ctx, spaceID, nodeToken)
 	if err != nil {
@@ -738,7 +752,6 @@ func downloadWikiChildren(ctx context.Context, client *core.Client, url string, 
 	}
 
 	fmt.Printf("📚 找到 %d 个子文档\n", len(allNodes))
-	// 初始化统计器
 	dlStats = &DownloadStats{}
 	dlStats.SetTotalDocs(len(allNodes))
 
@@ -1003,6 +1016,7 @@ func handleWikiTreeDownload(cliCtx *cli.Context, url string) error {
 	if err != nil {
 		return err
 	}
+	opts.cleanOutput = cliCtx.Bool("clean-output")
 
 	dlConfig = *config
 	client := core.NewClient(config.Feishu.AppId, config.Feishu.AppSecret)

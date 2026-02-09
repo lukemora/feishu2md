@@ -215,6 +215,10 @@ func main() {
 						Name:  "no-body-title",
 						Usage: "禁用正文开头的H1标题（frontmatter已含title）",
 					},
+					&cli.BoolFlag{
+						Name:  "clean-output",
+						Usage: "同步前清空输出目录，再按最新知识库树生成，避免重命名/删除后旧文件残留（输出目录应仅用于本同步）",
+					},
 				},
 				Action: handleWikiTreeCommand,
 			},
